@@ -60,20 +60,19 @@ def format_num(num):
         return None
 
 
-
-def process_rate(numSeqs, stime):
+def process_rate(num_seqs, stime):
     """
     Calculate amount of time to process sequences
 
-    :param numSeqs: Number of sequences processed
-    :type numSeqs: int
+    :param num_seqs: Number of sequences processed
+    :type num_seqs: int
     :param stime: Start time in seconds (since the epoch)
     :type stime: float
     :return: Number of sequences processed per second
     :rtype: float
     """
     etime = time.time()
-    return numSeqs / (etime - stime)
+    return num_seqs / (etime - stime)
 
 
 def parse_blast(line, line_num):
