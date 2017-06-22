@@ -13,6 +13,7 @@ import time
 import datetime
 import argparse
 import re
+import locale
 
 
 ###############################################################################
@@ -40,6 +41,39 @@ def exit_script(num=1):
     Exit script.
     """
     sys.exit(num)
+
+
+def format_num(num):
+    """
+    Format the number with commas.
+
+    :param num: Number to format
+    :type num: int or float
+    :return: Formatted number
+    :rtype: str
+    """
+    if isinstance(num, int):
+        return locale.format('%d', num, grouping=True)
+    elif isinstance(num, float):
+        return locale.format('%.1f', num, grouping=True)
+    else:
+        return None
+
+
+
+def process_rate(numSeqs, stime):
+    """
+    Calculate amount of time to process sequences
+
+    :param numSeqs: Number of sequences processed
+    :type numSeqs: int
+    :param stime: Start time in seconds (since the epoch)
+    :type stime: float
+    :return: Number of sequences processed per second
+    :rtype: float
+    """
+    etime = time.time()
+    return numSeqs / (etime - stime)
 
 
 def parse_blast(line, line_num):
@@ -92,7 +126,7 @@ def get_seq_ids(bf):
             # Add query ID to set
             seq_ids.add(blast['qseqid'])
     if vbs:
-        print_status('Obtained ' + str(len(seq_ids)) + ' unique IDs')
+        print_status('Obtained ' + format_num(len(seq_ids)) + ' unique IDs')
     return seq_ids
 
 
@@ -117,7 +151,11 @@ def print_seqs(ff, seq_ids, on, od):
     print_seq = ''  # Holds sequence
     if vbs:
         print_status('Filtering through FASTA file')
+    # Verbose output variables
     seq_num = 0
+    start_time = time.time()
+    nseq_for_timing = 10000
+    rate = 0
     num_filtered = 0
     with open(ff, 'r') as f:
         for line in f:
@@ -127,8 +165,18 @@ def print_seqs(ff, seq_ids, on, od):
             if re.match(r'>', line):
                 seq_num += 1
                 if vbs:
-                    print_status('Processed ' + str(seq_num) +
-                                 ' sequences', '\r')
+                    # Calculate rate of process (# sequences / second)
+                    if seq_num % nseq_for_timing == 0:
+                        rate = process_rate(nseq_for_timing, start_time)
+                        rate = format_num(rate)
+                        start_time = time.time()
+
+                    sn = format_num(seq_num)
+                    ps = 'Processed {} sequences [~ {} seqs/sec]'.format(sn,
+                                                                         rate)
+                    ps = '{:{}}'.format(ps, 15)
+                    print_status(ps, '\r')
+
                 # When we reach the sequence ID we have to check if there is a
                 # sequence that needs to be printed
                 if print_flag:
@@ -187,6 +235,9 @@ if not os.path.isfile(ff):
 if not os.path.isfile(bf):
     print_status('BLAST file "' + bf + '" does not exist.')
     exit_script()
+
+# Setup locale for printing out large numbers
+locale.setlocale(locale.LC_ALL, 'en_US')
 
 ###############################################################################
 # BEGIN PROCESSING FILES
