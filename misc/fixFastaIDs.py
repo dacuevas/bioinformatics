@@ -4,7 +4,7 @@
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com
 # Created on 21 Jun 2017
-# Updated on 21 Jun 2017
+# Updated on 22 Jun 2017
 
 from __future__ import print_function, absolute_import, division
 import sys
@@ -12,6 +12,7 @@ import os
 import time
 import datetime
 import argparse
+import locale
 
 
 ###############################################################################
@@ -41,6 +42,39 @@ def exit_script(num=1):
     sys.exit(num)
 
 
+def format_num(num):
+    """
+    Format the number with commas.
+
+    :param num: Number to format
+    :type num: int or float
+    :return: Formatted number
+    :rtype: str
+    """
+    if isinstance(num, int):
+        return locale.format('%d', num, grouping=True)
+    elif isinstance(num, float):
+        return locale.format('%.1f', num, grouping=True)
+    else:
+        return None
+
+
+
+def process_rate(numSeqs, stime):
+    """
+    Calculate amount of time to process sequences
+
+    :param numSeqs: Number of sequences processed
+    :type numSeqs: int
+    :param stime: Start time in seconds (since the epoch)
+    :type stime: float
+    :return: Number of sequences processed per second
+    :rtype: float
+    """
+    etime = time.time()
+    return numSeqs / (etime - stime)
+
+
 ###############################################################################
 # ARGUMENT PARSING
 ###############################################################################
@@ -62,6 +96,9 @@ vbs = args.verbose
 if not os.path.isfile(ff):
     print_status('FASTA file "' + ff + '" does not exist.')
 
+# Setup locale for printing out large numbers
+locale.setlocale(locale.LC_ALL, 'en_US')
+
 ###############################################################################
 # BEGIN PROCESSING FASTA FILE
 ###############################################################################
@@ -72,7 +109,12 @@ new_seq_name = 'SEQ'
 # Open new file to write to
 fout = open(os.path.join(od, on), 'w')
 
+# Verbose output variables
 seq_num = 0
+start_time = time.time()
+nseq_for_timing = 10000
+rate = 0
+
 # Iterate through FASTA file
 if vbs:
     print_status('Processing FASTA file')
@@ -84,12 +126,21 @@ with open(ff, 'r') as f:
         if line.startswith('>'):
             seq_num += 1
             if vbs:
-                print_status('Processed ' + str(seq_num) + ' sequences', '\r')
+                # Calculate rate of process (# sequences / second)
+                if seq_num % nseq_for_timing == 0:
+                    rate = process_rate(nseq_for_timing, start_time)
+                    rate = format_num(rate)
+                    start_time = time.time()
+
+                sn = format_num(seq_num)
+                ps = 'Processed {} sequences [~ {} seqs/sec]'.format(sn, rate)
+                ps = '{:{}}'.format(ps, 15)
+                print_status(ps, '\r')
 
             sid = line[1:]
-
             # Check if sequence ID was already seen
             if sid in seq_ids:
+                # Rename sequence ID
                 new_seq_id += 1
                 sid = new_seq_name + str(new_seq_id)
             seq_ids.add(sid)
