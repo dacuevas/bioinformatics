@@ -39,17 +39,31 @@ def parse_response(response, mseed, kegg):
     :type mseed: str
     :param kegg: KEGG reaction ID
     :type kegg: str
-    :return:
+    :return: None
     """
     # Check if response contains all items
     if not re.search(r'NAME', response):
         print('No NAME info for', mseed, ':', kegg, file=sys.stderr)
+        no_name = True
+    else:
+        no_name = False
 
     if not re.search(r'ENZYME', response):
         print('No ENZYME info for ', mseed, ':', kegg, file=sys.stderr)
+        no_enz = True
+    else:
+        no_enz = False
 
     if not re.search(r'ORTHOLOGY', response):
         print('No ORTHOLOGY info for ', mseed, ':', kegg, file=sys.stderr)
+        no_orth = True
+    else:
+        no_orth = False
+
+    # Check if there is no information in the response
+    if no_name and no_enz and no_orth:
+        print('\t\t\t')
+        return
 
     # Response contains newlines
     response = response.split('\n')
@@ -57,18 +71,29 @@ def parse_response(response, mseed, kegg):
     all_lines = []
     in_orthology = False
     for line in response:
-        if re.match(r'///', line):
+        if re.match(r'(///)|(REFERENCES)', line):
             # Reached the end of the orthology lines
             parse_orthology_lines(all_lines)
             break
 
         elif re.match(r'NAME', line):
             parse_name_line(line)
+            if no_enz and no_orth:
+                print('\t')
+                return
 
         elif re.match(r'ENZYME', line):
+            # Check if there was name info missing
+            if no_name:
+                print('\t', end='')
             parse_enzyme_line(line)
 
         elif re.match(r'ORTHOLOGY', line):
+            # Check if there was name and/or enzyme info missing
+            if no_name and no_enz:
+                print('\t\t')
+            elif no_enz:
+                print('\t')
             in_orthology = True
             ko = line.split()[1]
             all_lines = [ko]
@@ -171,7 +196,9 @@ print('mseed_id', 'equation', 'kegg_id', 'name', 'ec','pathway', sep='\t')
 
 # Iterate through reaction list from model
 for i, mseed_rxn in enumerate(model.reactions, start=1):
-    print('Processing reaction', str(i), end='\r', file=sys.stderr)
+    print('Processing reaction', str(i), 'of',
+          str(model.number_of_reactions()),
+          end='\r', file=sys.stderr)
     if mseed_rxn in mseed_to_kegg:
         kegg_rxn = mseed_to_kegg[mseed_rxn]
     else:
@@ -201,7 +228,9 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
         continue
 
     # Print reaction ID
-    print(mseed_rxn, kegg_rxn, '', end='', sep='\t')
+    print(mseed_rxn, model.reactions[mseed_rxn].equation, kegg_rxn, '',
+          end='', sep='\t')
     parse_response(response.text, mseed_rxn, kegg_rxn)
 
-print('Script completed!', file=sys.stderr)
+print('\nScript completed!', file=sys.stderr)
+
