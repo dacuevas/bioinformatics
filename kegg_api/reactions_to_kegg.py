@@ -4,7 +4,7 @@
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 19 Jul 2017
-# Updated on 23 Jul 2017
+# Updated on 25 Jul 2017
 
 from __future__ import print_function, absolute_import, division
 import requests
@@ -62,80 +62,64 @@ def parse_response(response, mseed, kegg):
 
     # Check if there is no information in the response
     if no_name and no_enz and no_orth:
+        print('No name, enzyme, or orthology found', file=sys.stderr)
         print('\t\t\t')
-        return
+        return None
 
     # Response contains newlines
-    response = response.split('\n')
+    response = response.rstrip().split('\n')
 
-    all_lines = []
-    in_orthology = False
+    all_name = []
+    all_enzyme = []
+    all_ko = []
+    curr_section = ''
     for line in response:
-        if re.match(r'(///)|(REFERENCES)', line):
-            # Reached the end of the orthology lines
-            parse_orthology_lines(all_lines)
-            break
+        kegg_section = line[:12].strip()
+        kegg_data = line[12:].strip()
+        if kegg_section != '':
+            curr_section = kegg_section
 
-        elif re.match(r'NAME', line):
-            parse_name_line(line)
-            if no_enz and no_orth:
-                print('\t')
-                return
+        if curr_section == 'NAME':
+            all_name.append(kegg_data.strip(';').strip())
 
-        elif re.match(r'ENZYME', line):
-            # Check if there was name info missing
-            if no_name:
-                print('\t', end='')
-            parse_enzyme_line(line)
+        elif curr_section == 'ENZYME':
+            all_enzyme.extend(kegg_data.split())
 
-        elif re.match(r'ORTHOLOGY', line):
-            # Check if there was name and/or enzyme info missing
-            if no_name and no_enz:
-                print('\t\t')
-            elif no_enz:
-                print('\t')
-            in_orthology = True
-            ko = line.split()[1]
-            all_lines = [ko]
+        elif curr_section == 'ORTHOLOGY':
+            # Collect all items
+            ko = re.match(r'K\d+', kegg_data).group(0)
+            all_ko.append(ko)
 
-        elif in_orthology:
-            ko = line.split()[0]
-            all_lines.append(ko)
+    # All data here
+    if not no_name and not no_enz and not no_orth:
+        print('\t' + ';'.join(all_name) + '\t', end='')
+        print(';'.join(all_enzyme) + '\t', end='')
+        print(';'.join(all_ko))
 
+    # Only NAME and ENZYME
+    elif no_orth:
+        print('\t' + ';'.join(all_name) + '\t' + ';'.join(all_enzyme) + '\t')
 
-def parse_name_line(line):
-    """
-    Parse the NAME line from the KEGG GET response
+    # Only NAME and ORTH
+    elif no_enz:
+        print('\t' + ';'.join(all_name) + '\t\t' + ';'.join(all_ko))
 
-    :param line: Name line from the response
-    :type line: str
-    :return: None
-    """
-    name = re.split(r'\s{2,}', line)[1]
-    print(name + '\t', end='')
+    # Only ENZYME and ORTH
+    elif no_name:
+        print('\t\t' + ';'.join(all_enzyme) + '\t' + ';'.join(all_ko))
 
+    # Only NAME
+    elif no_enz and no_orth:
+        print('\t' + ';'.join(all_name) + '\t\t')
 
-def parse_enzyme_line(line):
-    """
-    Parse the ENZYME line from the KEGG GET response
+    # Only ENZYME
+    elif no_name and no_orth:
+        print('\t\t' + ';'.join(all_enzyme) + '\t')
 
-    :param line: ENZYME line from the response
-    :type line: str
-    :return: None
-    """
-    enzymes = line.split()
-    print(';'.join(enzymes[1:]) + '\t', end='')
-
-
-def parse_orthology_lines(lines):
-    """
-    Parse the ORTHOLOGY (KO) lines from the KEGG GET response
-
-    :param lines: ORTHOLOGY lines from the response
-    :type lines: list
-    :return: None
-    """
-    print(';'.join(lines))
+    # Only ORTHOLOGY
+    elif no_name and no_enz:
+        # Print out ko data
+        print('\t\t\t' + ';'.join(all_ko))
 
 
 ###############################################################################
@@ -225,10 +209,12 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
 
     if response.text.strip('\n') == '':
         print('Response was empty for', kegg_rxn, file=sys.stderr)
+        print(mseed_rxn, model.reactions[mseed_rxn].equation,
+              kegg_rxn, 'None', 'None', 'None', sep='\t')
         continue
 
     # Print reaction ID
-    print(mseed_rxn, model.reactions[mseed_rxn].equation, kegg_rxn, '',
+    print(mseed_rxn, model.reactions[mseed_rxn].equation, kegg_rxn,
           end='', sep='\t')
     parse_response(response.text, mseed_rxn, kegg_rxn)
 
