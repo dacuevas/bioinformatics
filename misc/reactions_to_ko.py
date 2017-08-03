@@ -53,6 +53,17 @@ def exit_script(num=1):
 
 
 def make_kegg_query(ms, ko, log):
+    """
+    Setup a query to the KEGG API
+
+    :param ms: ModelSEED reaction ID
+    :type ms: str
+    :param ko: KEGG KO ID
+    :type ko: str
+    :param log: Log output file handle
+    :type log: File
+    :return: None
+    """
     # Set resource path
     resource = 'get/' + ko
 
@@ -65,17 +76,14 @@ def make_kegg_query(ms, ko, log):
         log.write('There was an error with the request '
                   'regarding ModelSEED reaction ' + ms
                   + ' and KO ' + ko + ', status code = '
-                  + response.status_code + '\n')
-        continue
+                  + str(response.status_code) + '\n')
 
     # Check that response is not empty
     elif response.text.strip('\n') == '':
-        log.write('Response was empty for KO '
-                  + ko + '\n')
-        continue
+        log.write('Response was empty for KO ' + ko + '\n')
 
     # Parse response
-    parse_kegg_response(response.text, mseed_rxn, ko, log_out)
+    parse_kegg_response(response.text, ms, ko, log)
 
 
 def parse_kegg_response(res, ms, ko, log):
@@ -95,7 +103,7 @@ def parse_kegg_response(res, ms, ko, log):
 
     :param res: API response text
     :type res: str
-    :param ms: Model SEED reaction ID
+    :param ms: ModelSEED reaction ID
     :type ms: str
     :param ko: KEGG KO ID
     :type ko: str
@@ -123,6 +131,90 @@ def parse_kegg_response(res, ms, ko, log):
         elif curr_section == 'ORTHOLOGY':
             ko_id = re.match(r'K\d+', kegg_data).group(0)
             print(ko_id)
+
+
+def make_bigg_query(ms, bi, log):
+    """
+    Setup a query to the BiGG API
+
+    :param ms: ModelSEED reaction ID
+    :type ms: str
+    :param bi: BiGG reaction ID
+    :type bi: str
+    :param log: Log output file handle
+    :type log: File
+    :return: KO IDs and EC numbers
+    :rtype: dict
+    """
+    # Set resource path
+    resource = 'universal/reactions/' + bi
+
+    # Issue request
+    full_path = os.path.join(BIGG_BASE_URL, resource)
+    response = requests.get(full_path)
+
+    # Check that status code is 200 = good
+    if response.status_code != 200:
+        log.write('There was an error with the request '
+                  'regarding ModelSEED reaction ' + ms
+                  + ' and BiGG ' + bi + ', status code = '
+                  + str(response.status_code) + '\n')
+
+    # Check that response is not empty
+    elif response.text.strip('\n') == '':
+        log.write('Response was empty for BiGG ' + bi + '\n')
+
+    # Parse response
+    return parse_bigg_response(response.json(), ms, bi, log)
+
+
+def parse_bigg_response(res, ms, bi, log):
+    """
+    Parse the BiGG API response text. Text is all plain text in JSON format.
+    The fields of interest are the KEGG Reaction ID or the EC number.
+
+    :param res: API JSON response
+    :type res: dict
+    :param ms: ModelSEED reaction ID
+    :type ms: str
+    :param bi: BiGG reaction ID
+    :type bi: str
+    :param log: Log output file handle
+    :type log: File
+    :return: KO IDs and EC numbers
+    :rtype: dict
+    """
+    data = {'KO': set(), 'EC': set()}  # Data to return
+
+    # Check if any database info exists
+    db_info = res['database_links']
+    if len(db_info) == 0:
+        log.write('No database info for BiGG ' + bi + '\n')
+
+    # Check for KEGG
+    elif 'KEGG Reaction' in db_info:
+        # May have multiple KO identfiers
+        for item in db_info['KEGG Reaction']:
+            if 'id' not in item:
+                log.write('KEGG reaction found but no ID for BiGG '
+                          + bi + ' and ModelSEED ' + ms + ' \n')
+            data['KO'].add(item['id'])
+
+    # Check for EC number of KEGG does not exist
+    elif 'EC Number' in db_info:
+        # May have multiple EC numbers
+        for item in db_info['EC Number']:
+            if 'id' not in item:
+                log.write('EC number found but no ID for BiGG '
+                          + bi + ' and ModelSEED ' + ms + ' \n')
+            data['EC'].add(item['id'])
+
+    # No KEGG or EC
+    else:
+        log.write('No KEGG Reaction or EC Number for BiGG '
+                  + bi + ' and ModelSEED ' + ms + ' \n')
+
+    return data
 
 
 ###############################################################################
@@ -220,12 +312,39 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
 
     # Get databases
     for db in aliases[mseed_rxn]:
+        #######################################
+        # METACYC & PLANTCYC
+        #######################################
         if db == 'MetaCyc' or db == 'PlantCyc':
-            log_out.write(mseed_rxn + ' has ' + db + ' info. Skipping\n')
+            log_out.write(mseed_rxn + ' database is ' + db + '. Skipping\n')
 
+        #######################################
+        # KEGG
+        #######################################
         elif db == 'KEGG':
             # May have multiple KO identifiers
-            for ko in aliases[db]:
+            for ko in aliases[mseed_rxn][db]:
                 make_kegg_query(mseed_rxn, ko, log_out)
+
+        #######################################
+        # BIGG
+        #######################################
+        elif db == 'BiGG':
+            # May have multiple BiGG identifiers
+            for bigg in aliases[mseed_rxn][db]:
+                # Get dictionary of KO IDs and EC numbers
+                bigg_info = make_bigg_query(mseed_rxn, bigg, log_out)
+
+                # Make queries to KEGG database with KO
+                for ko in bigg_info['KO']:
+                    make_kegg_query(mseed_rxn, ko, log_out)
+
+                # Make queries to KEGG database with EC
+                for ec in bigg_info['EC']:
+                    make_kegg_query(mseed_rxn, ec, log_out)
+
+        else:
+            log_out.write(mseed_rxn + ' database is ' + db
+                          + ' and not supported\n')
 
 log_out.close()
