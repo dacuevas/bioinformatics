@@ -4,7 +4,7 @@
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 02 Aug 2017
-# Updated on 02 Aug 2017
+# Updated on 03 Aug 2017
 from __future__ import print_function, absolute_import, division
 import sys
 import os
@@ -52,7 +52,7 @@ def exit_script(num=1):
     sys.exit(num)
 
 
-def make_kegg_query(ms, ko, log):
+def make_kegg_query(ms, ko, log, save_kos):
     """
     Setup a query to the KEGG API
 
@@ -62,6 +62,8 @@ def make_kegg_query(ms, ko, log):
     :type ko: str
     :param log: Log output file handle
     :type log: File
+    :param save_kos: Set to add KO IDs to
+    :type save_kos: set
     :return: None
     """
     # Set resource path
@@ -77,16 +79,18 @@ def make_kegg_query(ms, ko, log):
                   'regarding ModelSEED reaction ' + ms
                   + ' and KO ' + ko + ', status code = '
                   + str(response.status_code) + '\n')
+        return
 
     # Check that response is not empty
     elif response.text.strip('\n') == '':
         log.write('Response was empty for KO ' + ko + '\n')
+        return
 
     # Parse response
-    parse_kegg_response(response.text, ms, ko, log)
+    parse_kegg_response(response.text, ms, ko, log, save_kos)
 
 
-def parse_kegg_response(res, ms, ko, log):
+def parse_kegg_response(res, ms, ko, log, save_kos):
     """
     Parse the KEGG API response text. Text is all plain text without an
     easily digestible format. Feature headers are listed at the beginning of
@@ -109,6 +113,8 @@ def parse_kegg_response(res, ms, ko, log):
     :type ko: str
     :param log: Log output file handle
     :type log: File
+    :param save_kos: Set to add KO IDs to
+    :type save_kos: set
     :return: None
     """
     # Check if response contains KO info
@@ -128,9 +134,9 @@ def parse_kegg_response(res, ms, ko, log):
         if kegg_section != '':
             curr_section = kegg_section
 
-        elif curr_section == 'ORTHOLOGY':
+        if curr_section == 'ORTHOLOGY':
             ko_id = re.match(r'K\d+', kegg_data).group(0)
-            print(ko_id)
+            save_kos.add(ko_id)
 
 
 def make_bigg_query(ms, bi, log):
@@ -159,10 +165,12 @@ def make_bigg_query(ms, bi, log):
                   'regarding ModelSEED reaction ' + ms
                   + ' and BiGG ' + bi + ', status code = '
                   + str(response.status_code) + '\n')
+        return None
 
     # Check that response is not empty
     elif response.text.strip('\n') == '':
         log.write('Response was empty for BiGG ' + bi + '\n')
+        return None
 
     # Parse response
     return parse_bigg_response(response.json(), ms, bi, log)
@@ -243,8 +251,14 @@ if not os.path.isdir(args.mseeddir):
 # Check that ModelSEED directory is new
 alias_file = os.path.join(args.mseeddir,
                           'Biochemistry/Aliases/Reactions_Aliases.tsv')
+reactions_file = os.path.join(args.mseeddir,
+                              'Biochemistry/reactions.tsv')
 if not os.path.isfile(alias_file):
     print_status('ModelSEED Reactions_Aliases.tsv file does not exist')
+    exit_script()
+
+if not os.path.isfile(reactions_file):
+    print_status('ModelSEED reactions.tsv file does not exist')
     exit_script()
 
 # Set base URLs
@@ -254,8 +268,9 @@ BIGG_BASE_URL = 'http://bigg.ucsd.edu/api/v2/'
 ###############################################################################
 # BEGIN PROCESSING
 ###############################################################################
-# aliases will contain Reactions_Aliases.tsv info
-aliases = {}
+aliases = {}  # aliases will contain Reactions_Aliases.tsv info
+save_kos = set()  # save_kos will contain all KO IDs to print out
+
 # Load ModelSEED alias file
 if args.verbose:
     print_status('Parsing alias file')
@@ -283,6 +298,36 @@ with open(alias_file, 'r') as f:
 if args.verbose:
     print_status('Alias file parsing complete')
 
+# Load ModelSEED reactions file
+# This file does not have database information but does provide an alias
+# The default will be to guess it is a KEGG KO ID if it begins with 'R'. If
+# not, then it might be a BiGG ID
+if args.verbose:
+    print_status('Parsing reactions file')
+with open(reactions_file, 'r') as f:
+    header = f.readline()
+    for l in f:
+        l = l.rstrip('\n')
+        contents = l.split('\t')
+        ms, alias = contents[:2]
+
+        # Check alias name
+        if alias.startswith('R'):
+            db = 'KEGG'
+        else:
+            db = 'BiGG'
+
+        # Check if this reaction was not in the aliases file
+        if ms not in aliases:
+            aliases[ms] = {db: set()}
+        elif db not in aliases[ms]:
+            aliases[ms][db] = set()
+
+        aliases[ms][db].add(alias)
+
+if args.verbose:
+    print_status('Reactions file parsing complete')
+
 # Load model
 if args.verbose:
     print_status('Loading model')
@@ -308,7 +353,6 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
     # Check if reaction exists in alias dictionary
     if mseed_rxn not in aliases:
         log_out.write(mseed_rxn + ' not in alias file\n')
-        continue
 
     # Get databases
     for db in aliases[mseed_rxn]:
@@ -324,7 +368,7 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
         elif db == 'KEGG':
             # May have multiple KO identifiers
             for ko in aliases[mseed_rxn][db]:
-                make_kegg_query(mseed_rxn, ko, log_out)
+                make_kegg_query(mseed_rxn, ko, log_out, save_kos)
 
         #######################################
         # BIGG
@@ -334,17 +378,24 @@ for i, mseed_rxn in enumerate(model.reactions, start=1):
             for bigg in aliases[mseed_rxn][db]:
                 # Get dictionary of KO IDs and EC numbers
                 bigg_info = make_bigg_query(mseed_rxn, bigg, log_out)
+                if bigg_info == None:
+                    continue
 
                 # Make queries to KEGG database with KO
                 for ko in bigg_info['KO']:
-                    make_kegg_query(mseed_rxn, ko, log_out)
+                    make_kegg_query(mseed_rxn, ko, log_out, save_kos)
 
                 # Make queries to KEGG database with EC
                 for ec in bigg_info['EC']:
-                    make_kegg_query(mseed_rxn, ec, log_out)
+                    make_kegg_query(mseed_rxn, ec, log_out, save_kos)
 
         else:
             log_out.write(mseed_rxn + ' database is ' + db
                           + ' and not supported\n')
 
+###############################################################################
+# PRINT OUT DATA
+###############################################################################
+print('\n'.join(save_kos))
 log_out.close()
+print_status('Script complete!')
