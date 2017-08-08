@@ -149,7 +149,7 @@ def readDivisions():
     return divs
 
 
-def readGiTaxId(dtype='nucl'):
+def readGiTaxId(dtype='nucl', gz=True):
     '''
     Read gi_taxid.dmp. You can specify the type of database that you
     want to parse, default is nucl (nucleotide), can also accept prot 
@@ -160,9 +160,14 @@ def readGiTaxId(dtype='nucl'):
     if dtype != 'nucl' and dtype != 'prot':
         sys.stderr.write("Type must be either nucl or prot, not " + dtype + "\n")
         sys.exit(-1)
-    fileIn = defaultdir + "/gi_taxid_" + dtype + ".dmp.gz"
+    if gz:
+        fileIn = defaultdir + "/gi_taxid_" + dtype + ".dmp.gz"
+        fin = gzip.open(fileIn, 'r')
+    else:
+        fileIn = defaultdir + "/gi_taxid_" + dtype + ".dmp"
+        fin = open(fileIn, 'r')
     taxid={}
-    fin = gzip.open(fileIn, 'r')
+    #fin = gzip.open(fileIn, 'r')
     for line in fin:
         line = line.strip()
         parts=line.split("\t")
