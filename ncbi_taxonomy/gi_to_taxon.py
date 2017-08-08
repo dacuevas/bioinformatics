@@ -1,3 +1,12 @@
+#!/usr/local/bin/python3
+# gi_to_taxon.py
+# Collect taxonomy information for given GI numbers
+#
+# Author: Daniel A Cuevas (dcuevas08.at.gmail.com
+# Created on 07 Aug 2017
+# Updated on 07 Aug 2017
+
+
 from __future__ import print_function, absolute_import, division
 import sys
 import os
