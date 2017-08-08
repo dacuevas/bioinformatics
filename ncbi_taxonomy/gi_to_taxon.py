@@ -2,9 +2,9 @@
 # gi_to_taxon.py
 # Collect taxonomy information for given GI numbers
 #
-# Author: Daniel A Cuevas (dcuevas08.at.gmail.com
+# Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 07 Aug 2017
-# Updated on 07 Aug 2017
+# Updated on 08 Aug 2017
 
 
 from __future__ import print_function, absolute_import, division
@@ -122,7 +122,7 @@ for i, gi in enumerate(gi_counts, start=1):
         print('Converted', i, 'out of ', len(gi_counts), 'GI values',
               end='\r', file=sys.stderr)
     try:
-        tid = gi_to_taxid
+        tid = gi_to_taxid[gi]
         taxids[gi] = tid
 
     except KeyError:
@@ -132,7 +132,7 @@ for i, gi in enumerate(gi_counts, start=1):
 
 print_status('GI to TAXID conversion complete')
 
-gi_to_taxid.clear()  # Clear to remove from memory
+# gi_to_taxid.clear()  # Clear to remove from memory
 
 print_status('Loading TAXID => NAME database')
 names, blastnames = taxon.readNames()
@@ -174,8 +174,8 @@ for ti, tax_id in enumerate(taxids.values(), start=1):
 
     # Find all taxonomy hierarchy for this tax id
     # Loop until Phylum is reached. Phylum is right above Class
-    # End at Domain in case
-    while curr_node.rank == 'phylum' and curr_node.parent != 1:
+    # End at rank 1 in case
+    while curr_node.rank != 'phylum' and curr_node.parent != 1:
         curr_name = ''
         try:
             curr_name = names[curr_node.taxid].name
@@ -203,12 +203,12 @@ with open(out_file, 'w') as f:
     f.write('gi\tcount\tspecies\tgenus\tfamily\torder\tclass\n')
 
     for gi, tax_id in taxids.items():
-        count = gi_counts[gi]
+        count = str(gi_counts[gi])
         species = all_data[tax_id]['species']
         genus = all_data[tax_id]['genus']
         family = all_data[tax_id]['family']
         order = all_data[tax_id]['order']
-        clss = all_data['class']
+        clss = all_data[tax_id]['class']
 
         # Check if any are None; set to some default value
         default = ''
