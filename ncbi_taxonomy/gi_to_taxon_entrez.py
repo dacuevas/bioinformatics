@@ -16,6 +16,7 @@ import argparse
 from Bio import Entrez
 import re
 
+
 ###############################################################################
 # FUNCTION DEFINITIONS
 ###############################################################################
@@ -81,8 +82,6 @@ def get_summary(gi, log):
     except:
         raise
 
-    if tid == '':
-        log.write(gi + '\tTaxId was blank\n')
     if count > 1:
         log.write(gi + '\tMore than one TaxId found: ' + str(count) + '\n')
     return tid, name
@@ -117,7 +116,8 @@ def get_taxonomy(tid, log):
         log.write(tid + '\tMore than one Lineage found: ' + str(count))
     if tax is None:
         return tax
-    return tax.split('; ')
+    else:
+        return tax.split('; ')
 
 
 ###############################################################################
@@ -126,6 +126,9 @@ def get_taxonomy(tid, log):
 parser = argparse.ArgumentParser(description='')
 parser.add_argument('infile', help='Input file containing GI numbers')
 parser.add_argument('outdir', help='Output directory')
+parser.add_argument('email', help='Email address for Entrez')
+parser.add_argument('-s', '--skipfile', help='GI numbers to skip',
+                    default=None)
 parser.add_argument('-v', '--verbose', action='store_true',
                     help='Verbose output')
 
@@ -147,8 +150,9 @@ if not os.path.isdir(args.outdir):
 gi_file = args.infile
 out_dir = args.outdir
 vbs = args.verbose
+skip_file = args.skipfile
 gi_regex = re.compile('gi\|(\d+)\|')
-Entrez.email = 'tester@email.com'
+Entrez.email = args.email
 
 ###############################################################################
 # LOAD INPUT FILE
@@ -158,9 +162,18 @@ log = open(os.path.join(args.outdir, 'log.txt'), 'w', buffering=1)
 log.write(timestamp() + ' Starting script\n')
 gi_counts = {}  # Hold gi numbers and counts
 
+# Build set of GIs to skip if supplied
+gi_to_skip = set()
+if skip_file:
+    print_status('Loading skip file')
+    with open(skip_file, 'r') as f:
+        for l in f:
+            gi_to_skip.add(l.rstrip('\n'))
+    print_status('Finished skip file')
+
 # Read in GI file
 print_status('Loading input file\n')
-with open(gi_file) as f:
+with open(gi_file, 'r') as f:
     for li, l in enumerate(f, start=1):
         if vbs:
             reprint('Reading entry ' + str(li))
@@ -170,6 +183,8 @@ with open(gi_file) as f:
             continue
 
         gi = match.group(1)
+        if gi in gi_to_skip:
+            continue
 
         if gi in gi_counts:
             gi_counts[gi] += 1
@@ -185,7 +200,10 @@ print_status('Loaded {} unique GIs'.format(len(gi_counts)))
 # Open output file
 out_file = os.path.join(out_dir, 'tax_info.txt')
 print_status('Creating output file ' + out_file)
-with open(out_file, 'w') as f:
+missing_data = set()  # Hold GI numbers that were unsuccessful
+
+print_status('Begin Entrez queries')
+with open(out_file, 'w', buffering=1) as f:
     # Header info
     f.write('gi\tcount\ttaxonomy\n')
 
@@ -196,79 +214,69 @@ with open(out_file, 'w') as f:
             reprint('Working on {} ({} out of {})'.format(gi, i, numGi))
         tid = None
         name = None
+        tax = None
         # Make Entrez call
         try:
             # Get TaxId first
+            # If there is no information retrieved, set as None
             tid, name = get_summary(gi, log)
             if tid is None:
                 log.write(gi + '\tNo tax ID found\n')
                 sys.stderr.write(gi + '\tNo tax ID found\n')
                 sys.stderr.flush()
+                missing_data.add(gi)
+                continue
+
             elif tid == '':
                 log.write(gi + '\tTax ID was blank\n')
                 sys.stderr.write(gi + '\tTax ID was blank\n')
                 sys.stderr.flush()
+                missing_data.add(gi)
                 continue
 
             # Get taxonomy info next
-            tax = get_taxonomy(tid, log)
-            if tax is None:
-                log.write(tid + '\tNo tax info found\n')
-                sys.stderr.write(tid + '\tNo tax info found\n')
-                sys.stderr.flush()
-                continue
+            if tid is not None:
+                tax = get_taxonomy(tid, log)
+                if tax is None:
+                    log.write(tid + '\tNo tax info found\n')
+                    sys.stderr.write(tid + '\tNo tax info found\n')
+                    sys.stderr.flush()
+                    missing_data.add(gi)
+                    continue
 
-
-        # except httplib2.BadStatusLine:
-        #     log.write(gi + '\tBadStatusLine error\n')
-        #     sys.stderr.write(gi + '\tBadStatusLine error\n')
-        #     sys.stderr.flush()
-        #     continue
-        #
-        # except urllib3.URLError:
-        #     log.write(gi + '\tURLError occurred. Retrying in 5 seconds\n')
-        #     sys.stderr.write(gi
-        #                      + '\tURLError occurred. Retrying in 5 seconds\n')
-        #     sys.stderr.flush()
-        #     time.sleep(5)
-        #
-        #     try:
-        #         if tid is None:
-        #             tid, name = get_summary(gi, log)
-        #         tax = get_taxonomy(tid, log)
-        #
-        #     except httplib2.BadStatusLine:
-        #         log.write(gi + '\tBadStatusLine error\n')
-        #         sys.stderr.write(gi + '\tBadStatusLine error\n')
-        #         sys.stderr.flush()
-        #         continue
-        #
-        #     except urllib3.URLError:
-        #         log.write(gi + '\tURLError occurred again. Skipping\n')
-        #         sys.stderr.write(gi + '\tURLError occurred again. Skipping\n')
-        #         sys.stderr.flush()
-        #         continue
-        #
-        #     except Exception as e:
-        #         log.write(gi + '\tUnexpected error occurred: ' + str(e) + '\n')
-        #         sys.stderr.write(gi + '\tUnexpected error occurred: '
-        #                          + str(e) + '\n')
-        #         sys.stderr.flush()
-        #         continue
-        #
-        #
         except Exception as e:
             log.write(gi + '\tUnexpected error occurred: ' + str(e) + '\n')
             sys.stderr.write(gi + '\tUnexpected error occurred: '
                              + str(e) + '\n')
             sys.stderr.flush()
+            missing_data.add(gi)
             continue
 
         # Print out tax info
+        # Check if we were able to retrieve anything
+        if tid is None:
+            name = ''
+        if tax is None:
+            tax = ['']
+
+        # Remove 'cellular organisms' from list
+        if tax[0] == 'cellular organisms':
+            tax = tax[1:]
         tax_str = '\t'.join(tax)
         count = str(gi_counts[gi])
         f.write('\t'.join([gi, count, name, tax_str]) + '\n')
 
+print_status('Entrez queries complete')
+
+# Write out missing data
+if len(missing_data) == 0:
+    print_status('All GI numbers were found')
+else:
+    print_status(
+        'A total of {} GI numbers were not found'.format(len(missing_data)))
+    with open(os.path.join(out_dir, 'missing_gi.txt'), 'r') as f:
+        for gi in sorted(missing_data):
+            f.write(gi + '\n')
 
 log.write(timestamp() + ' Script complete\n')
 log.close()
