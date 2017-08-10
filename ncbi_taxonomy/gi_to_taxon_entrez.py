@@ -1,10 +1,14 @@
 #!/usr/local/bin/python3
 # gi_to_taxon_entrez.py
 # Collect taxonomy information for given GI numbers by querying Entrez db
+# Three files are created:
+#    1) tax_info.txt:    taxonomy for given GI numbers
+#    2) log.txt:         script logging of errors or issues
+#    3) missing_gi.txt:  GI information that produced errors during query
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 09 Aug 2017
-# Updated on 09 Aug 2017
+# Updated on 10 Aug 2017
 
 
 from __future__ import print_function, absolute_import, division
@@ -123,7 +127,15 @@ def get_taxonomy(tid, log):
 ###############################################################################
 # ARGUMENT PARSING
 ###############################################################################
-parser = argparse.ArgumentParser(description='')
+desc = '''Collect taxonomy information for given GI numbers by querying Entrez db
+Three files are created:
+   1) tax_info.txt:    taxonomy for given GI numbers
+   2) log.txt:         script logging of errors or issues
+   3) missing_gi.txt:  GI information that produced errors during query
+'''
+parser = argparse.ArgumentParser(description=desc,
+                                 formatter_class=
+                                 argparse.RawDescriptionHelpFormatter)
 parser.add_argument('infile', help='Input file containing GI numbers')
 parser.add_argument('outdir', help='Output directory')
 parser.add_argument('email', help='Email address for Entrez')
@@ -143,6 +155,12 @@ if not os.path.isfile(args.infile):
 # Check that output directory exists
 if not os.path.isdir(args.outdir):
     print(args.outdir, 'does not exist', file=sys.stderr)
+    parser.print_usage()
+    exit_script()
+
+# Check that skip file exists
+if args.skipfile and not os.path.isfile(args.skipfile):
+    print(args.skipfile, 'does not exist', file=sys.stderr)
     parser.print_usage()
     exit_script()
 
@@ -215,10 +233,10 @@ with open(out_file, 'w', buffering=1) as f:
         tid = None
         name = None
         tax = None
-        # Make Entrez call
+        # Make Entrez call and capture any HTTP errors
+        # If any errors occur, save GI to the missing data set and report later
         try:
             # Get TaxId first
-            # If there is no information retrieved, set as None
             tid, name = get_summary(gi, log)
             if tid is None:
                 log.write(gi + '\tNo tax ID found\n')
@@ -235,14 +253,13 @@ with open(out_file, 'w', buffering=1) as f:
                 continue
 
             # Get taxonomy info next
-            if tid is not None:
-                tax = get_taxonomy(tid, log)
-                if tax is None:
-                    log.write(tid + '\tNo tax info found\n')
-                    sys.stderr.write(tid + '\tNo tax info found\n')
-                    sys.stderr.flush()
-                    missing_data.add(gi)
-                    continue
+            tax = get_taxonomy(tid, log)
+            if tax is None:
+                log.write(tid + '\tNo tax info found\n')
+                sys.stderr.write(tid + '\tNo tax info found\n')
+                sys.stderr.flush()
+                missing_data.add(gi)
+                continue
 
         except Exception as e:
             log.write(gi + '\tUnexpected error occurred: ' + str(e) + '\n')
@@ -253,12 +270,6 @@ with open(out_file, 'w', buffering=1) as f:
             continue
 
         # Print out tax info
-        # Check if we were able to retrieve anything
-        if tid is None:
-            name = ''
-        if tax is None:
-            tax = ['']
-
         # Remove 'cellular organisms' from list
         if tax[0] == 'cellular organisms':
             tax = tax[1:]
@@ -268,15 +279,20 @@ with open(out_file, 'w', buffering=1) as f:
 
 print_status('Entrez queries complete')
 
-# Write out missing data
+###############################################################################
+# FAILED GI
+###############################################################################
+# Write out GIs that we were unable to retrieve
 if len(missing_data) == 0:
     print_status('All GI numbers were found')
 else:
     print_status(
-        'A total of {} GI numbers were not found'.format(len(missing_data)))
+        'A total of {} GI numbers had issues '
+        'retrieving through Entrez'.format(len(missing_data)))
     with open(os.path.join(out_dir, 'missing_gi.txt'), 'r') as f:
+        f.write('gi\tcount\n')
         for gi in sorted(missing_data):
-            f.write(gi + '\n')
+            f.write('{}\t{}\n'.format(gi, gi_counts[gi]))
 
 log.write(timestamp() + ' Script complete\n')
 log.close()
