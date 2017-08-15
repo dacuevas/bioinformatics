@@ -8,7 +8,7 @@
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 09 Aug 2017
-# Updated on 10 Aug 2017
+# Updated on 11 Aug 2017
 
 
 from __future__ import print_function, absolute_import, division
@@ -56,6 +56,58 @@ def exit_script(num=1):
     sys.exit(num)
 
 
+def query_entrez(gi, retry, log):
+    """
+    Get taxonomy info given an GI number
+
+    :param gi: GI number
+    :type gi: str
+    :param retry: Set of GI numbers to retry
+    :type retry: set
+    :param log: Log file handle
+    :type log: file
+    :return: Taxonomy information and name
+    :rtype: list, str
+    """
+    # Make Entrez call and capture any HTTP errors
+    # If any errors occur, save GI to the missing data set and try again
+    try:
+        # Get TaxId first
+        tid, name = get_summary(gi, log)
+        if tid is None:
+            log.write(gi + '\tNo tax ID found\n')
+            sys.stderr.write(gi + '\tNo tax ID found\n')
+            sys.stderr.flush()
+            retry.add(gi)
+            return None, None
+
+        elif tid == '':
+            log.write(gi + '\tTax ID was blank\n')
+            sys.stderr.write(gi + '\tTax ID was blank\n')
+            sys.stderr.flush()
+            retry.add(gi)
+            return None, None
+
+        # Get taxonomy info next
+        tax = get_taxonomy(tid, log)
+        if tax is None:
+            log.write(tid + '\tNo tax info found\n')
+            sys.stderr.write(tid + '\tNo tax info found\n')
+            sys.stderr.flush()
+            retry.add(gi)
+            return None, None
+
+    except Exception as e:
+        log.write(gi + '\tUnexpected error occurred: ' + str(e) + '\n')
+        sys.stderr.write(gi + '\tUnexpected error occurred: '
+                         + str(e) + '\n')
+        sys.stderr.flush()
+        retry.add(gi)
+        return None, None
+
+    return tax, name
+
+
 def get_summary(gi, log):
     """
     Get summary info from Entrez
@@ -63,7 +115,7 @@ def get_summary(gi, log):
     :param gi: GI number
     :type gi: str
     :param log: Log file handle
-    :type log: File
+    :type log: file
     :return: Tax ID and Name
     :rtype: str, str
     """
@@ -98,7 +150,7 @@ def get_taxonomy(tid, log):
     :param tid: Taxonomy ID number
     :type tid: str
     :param log: Log file handle
-    :type log: File
+    :type log: file
     :return: Taxonomy path
     :rtype: list
     """
@@ -218,7 +270,8 @@ print_status('Loaded {} unique GIs'.format(len(gi_counts)))
 # Open output file
 out_file = os.path.join(out_dir, 'tax_info.txt')
 print_status('Creating output file ' + out_file)
-missing_data = set()  # Hold GI numbers that were unsuccessful
+retry = set()  # Hold GI numbers that were unsuccessful, retry query after
+missing_data = set()  # Hold GI numbers that were unsuccessful again
 
 print_status('Begin Entrez queries')
 with open(out_file, 'w', buffering=1) as f:
@@ -230,43 +283,9 @@ with open(out_file, 'w', buffering=1) as f:
     for i, gi in enumerate(sorted(gi_counts), start=1):
         if vbs:
             reprint('Working on {} ({} out of {})'.format(gi, i, numGi))
-        tid = None
-        name = None
-        tax = None
-        # Make Entrez call and capture any HTTP errors
-        # If any errors occur, save GI to the missing data set and report later
-        try:
-            # Get TaxId first
-            tid, name = get_summary(gi, log)
-            if tid is None:
-                log.write(gi + '\tNo tax ID found\n')
-                sys.stderr.write(gi + '\tNo tax ID found\n')
-                sys.stderr.flush()
-                missing_data.add(gi)
-                continue
 
-            elif tid == '':
-                log.write(gi + '\tTax ID was blank\n')
-                sys.stderr.write(gi + '\tTax ID was blank\n')
-                sys.stderr.flush()
-                missing_data.add(gi)
-                continue
-
-            # Get taxonomy info next
-            tax = get_taxonomy(tid, log)
-            if tax is None:
-                log.write(tid + '\tNo tax info found\n')
-                sys.stderr.write(tid + '\tNo tax info found\n')
-                sys.stderr.flush()
-                missing_data.add(gi)
-                continue
-
-        except Exception as e:
-            log.write(gi + '\tUnexpected error occurred: ' + str(e) + '\n')
-            sys.stderr.write(gi + '\tUnexpected error occurred: '
-                             + str(e) + '\n')
-            sys.stderr.flush()
-            missing_data.add(gi)
+        tax, name = query_entrez(gi, retry, log)
+        if tax is None:
             continue
 
         # Print out tax info
@@ -277,18 +296,40 @@ with open(out_file, 'w', buffering=1) as f:
         count = str(gi_counts[gi])
         f.write('\t'.join([gi, count, name, tax_str]) + '\n')
 
+    # If there are any GI numbers that had issues, try to get info again
+    num_retry = len(retry)
+    if num_retry > 0:
+        print_status('{} GI numbers had an issue during query. '
+                     'Retrying them now.'.format(num_retry))
+        for i, gi in enumerate(sorted(retry), start=1):
+            if vbs:
+                reprint(
+                    'Working on {} ({} out of {})'.format(gi, i, num_retry))
+                tax, name = query_entrez(gi, missing_data, log)
+                if tax is None:
+                    continue
+
+                # Print out tax info
+                # Remove 'cellular organisms' from list
+                if tax[0] == 'cellular organisms':
+                    tax = tax[1:]
+                tax_str = '\t'.join(tax)
+                count = str(gi_counts[gi])
+                f.write('\t'.join([gi, count, name, tax_str]) + '\n')
+
 print_status('Entrez queries complete')
 
 ###############################################################################
 # FAILED GI
 ###############################################################################
 # Write out GIs that we were unable to retrieve
-if len(missing_data) == 0:
+num_missing = len(missing_data)
+if num_missing == 0:
     print_status('All GI numbers were found')
 else:
     print_status(
         'A total of {} GI numbers had issues '
-        'retrieving through Entrez'.format(len(missing_data)))
+        'retrieving through Entrez'.format(num_missing))
     with open(os.path.join(out_dir, 'missing_gi.txt'), 'r') as f:
         f.write('gi\tcount\n')
         for gi in sorted(missing_data):
