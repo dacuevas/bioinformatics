@@ -68,6 +68,7 @@ args = parser.parse_args()
 
 # Check to see if input file exists
 if not check_file(args.sff):
+    print('File', args.sff, 'does not exist', file=sys.stderr)
     parser.print_help()
     exit_script()
 
