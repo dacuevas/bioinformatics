@@ -1,9 +1,6 @@
 #!/usr/local/bin/python3
 # genbank_sequences.py
-# Extract sequences of marker genes from GenBank file
-# Genes listed are from paper:
-#    Thompson, CC et al. (2009) Genomic taxonomy of vibrios
-#    doi:10.1186/1471-2148-9-258
+# Extract sequences from GenBank file
 #
 # Author: Daniel A Cuevas (dcuevas08.at.gmail.com)
 # Created on 31 Aug 2017
