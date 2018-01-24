@@ -82,22 +82,25 @@ if minLen:
     myParams["length"] = minLen
 
 # Print out options
-if args.verbose:
-    print("***********************************************", file=sys.stderr)
-    print("Running mgrast-get-function-organism.py", file=sys.stderr)
-    print("Making queries from", API_BASE_URL, file=sys.stderr)
-    print("Options supplied:", file=sys.stderr)
-    print("     Input file:                        ", args.mgfile, file=sys.stderr)
-    print("     Output file:                       ", args.outfile, file=sys.stderr)
-    print("     Source database:                   ", source, file=sys.stderr)
-    print("     Minimum identity threshold:        ", minID, file=sys.stderr)
-    print("     Minimum alignment length threshold:", minLen, file=sys.stderr)
-    print("     Authentication key:                ", auth, file=sys.stderr)
-    print("***********************************************\n", file=sys.stderr)
-    sys.stderr.flush()
+print("***********************************************", file=sys.stderr)
+print("Running mgrast-get-function-organism.py", file=sys.stderr)
+print("Making queries from", API_BASE_URL, file=sys.stderr)
+print("Options supplied:", file=sys.stderr)
+print("     Input file:                        ", args.mgfile, file=sys.stderr)
+print("     Output file:                       ", args.outfile, file=sys.stderr)
+print("     Source database:                   ", source, file=sys.stderr)
+print("     Minimum identity threshold:        ", minID, file=sys.stderr)
+print("     Minimum alignment length threshold:", minLen, file=sys.stderr)
+print("     Authentication key:                ", auth, file=sys.stderr)
+print("***********************************************\n", file=sys.stderr)
+sys.stderr.flush()
 
 # Open file for output
 fout = open(args.outfile, "w")
+myHeader = ["MetagenomeID", "QueryID", "Percent_Identity", "Alignment_Length",
+            "Number_Of_Mismatches", "Number_Of_Gaps", "Query_Start",
+            "Query_End", "Evalue", "Accession", "Function", "Organism"]
+fout.write("\t".join(myHeader) + "\n")
 
 # Loop through file
 with open(args.mgfile, "r") as mgf:
@@ -152,7 +155,7 @@ with open(args.mgfile, "r") as mgf:
                 mgmID = mgID
 
             # Loop through annotation data
-            for info in contents[-1].split(";"):
+            for info in re.split(r"(?<=]);", contents[-1]):
                 acc = func = org = "None"
                 if re.search(r"accession=\[(.*)\]", info):
                     acc = re.search(r"accession=\[(.*?)\]", info).group(1)
